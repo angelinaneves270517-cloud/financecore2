@@ -1071,7 +1071,7 @@ function onUplFile(inp){
     SB.functions.invoke('extrair-fatura',{body:{b64:b64,mediaType:mt,isPdf:mt.indexOf('pdf')>=0}}).then(function(res){
       if(res.error)throw res.error;
       var txt=(res.data&&res.data.texto)||'';
-      txt=txt.replace(/```json|```/g,'').trim();
+      txt=txt.replace(new RegExp('\u0060\u0060\u0060json|\u0060\u0060\u0060','g'),'').trim();
       var m=txt.match(/\{[\s\S]*\}/),c={};
       if(m)try{c=JSON.parse(m[0]);}catch(ex){}
       if(st)st.innerHTML=(c.fornecedor||c.valor)?'<span style="color:var(--green)">✓ Extraído!</span>':'<span style="color:var(--amber)">⚠ Preencha manualmente.</span>';
