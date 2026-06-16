@@ -1055,16 +1055,40 @@ function delLanc(id){if(!guardEdit())return;if(!confirm('Eliminar?'))return;var 
 function mNovoLanc(){if(!guardEdit())return;modal('<div style="background:var(--bg2);border-radius:var(--rl);border:1px solid var(--border);width:660px;max-height:88vh;overflow-y:auto"><div class="mh"><span class="mt">Novo Lançamento</span><button class="ib" onclick="cM()">'+iX()+'</button></div><div class="mb">'+buildLancForm({})+'</div><div class="mf"><button class="btn" onclick="cM()">Cancelar</button><button class="btn btn-gold" onclick="saveLanc()">Guardar</button></div></div>');}
 function mEditLanc(id){if(!guardEdit())return;var l=LANCS.filter(function(x){return x.id===id;})[0];if(!l)return;modal('<div style="background:var(--bg2);border-radius:var(--rl);border:1px solid var(--border);width:660px;max-height:88vh;overflow-y:auto"><div class="mh"><span class="mt">Editar — '+l.ref+'</span><button class="ib" onclick="cM()">'+iX()+'</button></div><div class="mb">'+buildLancForm(l)+'</div><div class="mf"><button class="btn" onclick="cM()">Cancelar</button><button class="btn btn-gold" onclick="updLanc(\''+id+'\')">Guardar</button></div></div>');}
 function mUploadLanc(){if(!guardEdit())return;window._upFileData=null;modal('<div style="background:var(--bg2);border-radius:var(--rl);border:1px solid var(--border);width:660px;max-height:88vh;overflow-y:auto"><div class="mh"><span class="mt">Upload IA</span><button class="ib" onclick="cM()">'+iX()+'</button></div><div class="mb"><div style="border:2px dashed var(--border2);border-radius:var(--r);padding:16px;text-align:center;margin-bottom:11px;cursor:pointer" onclick="document.getElementById(\'upl-fi\').click()"><div style="font-size:24px">📄</div><div style="font-size:12px;font-weight:600">Selecionar PDF/Imagem</div><input type="file" id="upl-fi" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="onUplFile(this)"><div id="upl-st" style="font-size:12px;color:var(--golddim);margin-top:4px"></div></div>'+buildLancForm({})+'</div><div class="mf"><button class="btn" onclick="cM()">Cancelar</button><button class="btn btn-gold" onclick="confUpload()">✓ Confirmar</button></div></div>');}
-function onUplFile(inp){if(!inp||!inp.files||!inp.files[0])return;var file=inp.files[0];var st=$('upl-st');if(st)st.innerHTML='<span style="color:var(--amber)">⏳ A extrair...</span>';var reader=new FileReader();reader.onload=function(e){var b64=e.target.result.split(',')[1];var mt=file.type||'application/pdf';window._upFileData={nome:file.name,tipo:mt,b64:e.target.result,tamanho:formatBytes(file.size),data:new Date().toLocaleDateString('pt-PT')};var arr=mt.includes('pdf')?[{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},{type:'text',text:'Extrai JSON: {"fornecedor":"","nif":"","valor":"","data":"YYYY-MM-DD","referencia":"","descricao":""}'}]:[{type:'image',source:{type:'base64',media_type:mt,data:b64}},{type:'text',text:'Extrai JSON: {"fornecedor":"","nif":"","valor":"","data":"YYYY-MM-DD","referencia":"","descricao":""}'}];fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:600,messages:[{role:'user',content:arr}]})}).then(function(r){return r.json();}).then(function(data){var txt='';if(data.content)for(var i=0;i<data.content.length;i++){if(data.content[i].type==='text'){txt=data.content[i].text;break;}}txt=txt.replace(/```json|```/g,'').trim();var m=txt.match(/\{[\s\S]*\}/),c={};if(m)try{c=JSON.parse(m[0]);}catch(ex){}if(st)st.innerHTML=c.fornecedor||c.valor?'<span style="color:var(--green)">✓ Extraído!</span>':'<span style="color:var(--amber)">⚠ Preencha manualmente.</span>';if(c.fornecedor)sv('li-forn',c.fornecedor);if(c.nif)sv('li-nif',c.nif);if(c.valor)sv('li-val',String(c.valor).replace(/[^\d.,\-]/g,'').replace(',','.'));if(c.data)sv('li-data',c.data);if(c.referencia)sv('li-ref',c.referencia);sv('li-desc',c.descricao||file.name);}).catch(function(){if(st)st.innerHTML='<span style="color:var(--amber)">⚠ Erro IA.</span>';});};reader.readAsDataURL(file);}
-function confUpload(){if(!guardEdit())return;var d=lerLanc();if(!validaLanc(d))return;d.id='L'+IDS.lanc++;d.alocado=false;LANCS.push(d);if(d.estado==='lançado'){atualizarOrcDoLanc(d,'adicionar');d.alocado=true;}cM();pgLanc();}
-function pgLanc(){
-  var C=$('content'),tot=LANCS.reduce(function(s,l){return s+(+l.val||0);},0);
-  var h='<div class="kg">'+kpi('Total',LANCS.length,'')+kpi('Valor','€'+fmt(tot),'',true)+kpi('Por imputar',LANCS.filter(function(l){return!l.cc||!l.cc.length;}).length,'')+kpi('Diários',DIARIOS.length,'')+'</div>';
-  if(!LANCS.length){h+='<div style="text-align:center;padding:40px;background:var(--bg2);border-radius:var(--rl);border:1px solid var(--border)">'+(podeEditar()?'<button class="btn btn-gold" onclick="mNovoLanc()">+ Novo</button> <button class="btn" onclick="mUploadLanc()">Upload IA</button>':'<div style="color:var(--text3)">Sem lançamentos.</div>')+'</div>';C.innerHTML=h;return;}
-  h+='<div class="tw"><table class="tbl"><thead><tr><th>Ref.</th><th>Data</th><th>Diário</th><th>Fornecedor</th><th>Empresa</th><th style="text-align:right">Valor</th><th>Estado</th><th></th></tr></thead><tbody>';
-  LANCS.forEach(function(l){h+='<tr><td style="font-weight:500;color:var(--golddim)">'+l.ref+'</td><td style="font-size:11px">'+fd(l.data)+'</td><td><span class="tag">'+(l.diario||'')+'</span></td><td>'+(l.forn||'—')+'</td><td>'+(l.emp?'<span class="tag">'+l.emp+'</span>':'—')+'</td><td style="text-align:right;font-weight:600;color:var(--golddim)">€'+fmt(+l.val||0)+'</td><td>'+estBdg(l.estado||'lançado')+'</td><td><div style="display:flex;gap:2px">'+ibEd('mEditLanc(\''+l.id+'\')')+ibDel('delLanc(\''+l.id+'\')')+'</div></td></tr>';});
-  h+='</tbody></table></div>';
-  C.innerHTML=h;
+function onUplFile(inp){
+  if(!inp||!inp.files||!inp.files[0])return;
+  var file=inp.files[0];var st=$('upl-st');
+  if(st)st.innerHTML='<span style="color:var(--amber)">⏳ A extrair...</span>';
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var b64=e.target.result.split(',')[1];
+    var mt=file.type||'application/pdf';
+    window._upFileData={nome:file.name,tipo:mt,b64:e.target.result,tamanho:formatBytes(file.size),data:new Date().toLocaleDateString('pt-PT')};
+    if(!(typeof SB!=='undefined'&&SB&&SB.functions)){
+      if(st)st.innerHTML='<span style="color:var(--amber)">⚠ Extração IA indisponível. Preencha manualmente.</span>';
+      sv('li-desc',file.name);return;
+    }
+    SB.functions.invoke('extrair-fatura',{body:{b64:b64,mediaType:mt,isPdf:mt.indexOf('pdf')>=0}}).then(function(res){
+      if(res.error)throw res.error;
+      var txt=(res.data&&res.data.texto)||'';
+      txt=txt.replace(/```json|```/g,'').trim();
+      var m=txt.match(/\{[\s\S]*\}/),c={};
+      if(m)try{c=JSON.parse(m[0]);}catch(ex){}
+      if(st)st.innerHTML=(c.fornecedor||c.valor)?'<span style="color:var(--green)">✓ Extraído!</span>':'<span style="color:var(--amber)">⚠ Preencha manualmente.</span>';
+      if(c.fornecedor)sv('li-forn',c.fornecedor);
+      if(c.nif)sv('li-nif',c.nif);
+      if(c.valor)sv('li-val',String(c.valor).replace(/[^\d.,\-]/g,'').replace(',','.'));
+      if(c.data)sv('li-data',c.data);
+      if(c.referencia)sv('li-ref',c.referencia);
+      sv('li-desc',c.descricao||file.name);
+    }).catch(function(err){
+      console.error('extrair-fatura',err);
+      if(st)st.innerHTML='<span style="color:var(--amber)">⚠ Erro na extração. Preencha manualmente.</span>';
+      sv('li-desc',file.name);
+    });
+  };
+  reader.readAsDataURL(file);
+}
 }
 
 // ═══ FATURAS ═══
