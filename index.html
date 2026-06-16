@@ -1086,11 +1086,9 @@ function onUplFile(inp){
       if(st)st.innerHTML='<span style="color:var(--amber)">⚠ Erro na extração. Preencha manualmente.</span>';
       sv('li-desc',file.name);
     });
-  };
+ };
   reader.readAsDataURL(file);
 }
-}
-
 // ═══ FATURAS ═══
 // --- Configuração do fluxo de aprovação ---
 var ALCADAS=[{ate:1000,aprov:1},{ate:5000,aprov:2},{ate:null,aprov:3}];
