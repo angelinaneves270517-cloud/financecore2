@@ -1497,17 +1497,6 @@ function pgOrc(){
   h+='</tbody></table></div>';
   C.innerHTML=h;
 }
-  /* ════════════════════════════════════════════════════════════════════════
-   LANÇAMENTOS / UPLOAD IA — correções:
-   (1) escolher departamento + utilizadores que aprovam
-   (2) centros de custo deixam de aparecer vazios
-   (3) botão "Confirmar" passa a funcionar
-   (4) Valor c/IVA e s/IVA (CC usa o valor s/IVA)
-   COLAR ESTE BLOCO NO FIM, mesmo antes do último </script>.
-   (As versões antigas ficam acima e deixam de ser usadas.)
-   ════════════════════════════════════════════════════════════════════════ */
-
-
 /* ─── (2) CC vazios: não apagar a semente local quando a tabela vem vazia ── */
 function sbCarregarTudo(cb){
   if(!sbAtivo()){if(cb)cb();return;}
