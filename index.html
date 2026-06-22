@@ -1497,6 +1497,235 @@ function pgOrc(){
   h+='</tbody></table></div>';
   C.innerHTML=h;
 }
+  /* ════════════════════════════════════════════════════════════════════════
+   LANÇAMENTOS / UPLOAD IA — correções:
+   (1) escolher departamento + utilizadores que aprovam
+   (2) centros de custo deixam de aparecer vazios
+   (3) botão "Confirmar" passa a funcionar
+   (4) Valor c/IVA e s/IVA (CC usa o valor s/IVA)
+   COLAR ESTE BLOCO NO FIM, mesmo antes do último </script>.
+   (As versões antigas ficam acima e deixam de ser usadas.)
+   ════════════════════════════════════════════════════════════════════════ */
+
+
+/* ─── (2) CC vazios: não apagar a semente local quando a tabela vem vazia ── */
+function sbCarregarTudo(cb){
+  if(!sbAtivo()){if(cb)cb();return;}
+  var tabelas=Object.keys(SB_MAP),pend=tabelas.length,erros=[];
+  if(!pend){if(cb)cb();return;}
+  tabelas.forEach(function(tab){
+    SB.from(tab).select('*').then(function(res){
+      if(res.error){
+        var msg=res.error.message||res.error.details||JSON.stringify(res.error);
+        console.error('load '+tab+': '+msg);erros.push(tab+': '+msg);
+      }else{
+        var m=SB_MAP[tab],arr=m.arr(),rows=res.data||[];
+        if(rows.length){arr.length=0;rows.forEach(function(row){arr.push(m.from(row));});}
+      }
+      if(--pend===0){
+        if(erros.length){gdToast('Supabase: '+erros[0],true);}
+        sbCarregarPLX(function(){sbCarregarConfig(function(){if(cb)cb();});});
+      }
+    });
+  });
+}
+
+
+/* ─── (4) FORMULÁRIO com IVA + base s/IVA, e (1) departamento/aprovadores ── */
+function buildLancForm(l){
+  l=l||{};
+  var ccs=l.cc&&l.cc.length?l.cc:[{ccId:'',pct:100,valor:0}];
+  var total=+(l.val||0);
+  var iva=(l.iva!=null&&l.iva!=='')?+l.iva:23;
+  var base=(l.base!=null&&l.base!=='')?+l.base:(iva>0?+(total/(1+iva/100)).toFixed(2):total);
+  var ccH='<div id="ccrows">';
+  ccs.forEach(function(c,i){ccH+=ccRowHtml(i,c.ccId,c.pct||0,c.valor?(+c.valor).toFixed(2):(base>0?(base*(c.pct||0)/100).toFixed(2):'0.00'));});
+  ccH+='</div>';
+  _ccSeq=ccs.length;
+  var dst=l.destino||(l.estado==='em aprovação'?'aprovacao':'lancado');
+  var showDep=dst==='aprovacao'?'':'display:none';
+  return ''+
+   '<div class="fg"><div class="fr"><label class="fl">Ref. *</label><input class="fi" id="li-ref" value="'+escH(l.ref||'LC'+new Date().getFullYear()+'/'+String(IDS.lanc).padStart(4,'0'))+'"></div><div class="fr"><label class="fl">Data *</label><input class="fi" type="date" id="li-data" value="'+(l.data||hj())+'"></div></div>'+
+   '<div class="fg"><div class="fr"><label class="fl">Diário</label><select class="fi" id="li-diario">'+DIARIOS.map(function(d){return'<option'+(d===(l.diario||'Compras')?' selected':'')+'>'+d+'</option>';}).join('')+'</select></div><div class="fr"><label class="fl">Empresa *</label><select class="fi" id="li-emp"><option value="">—</option>'+entOpts(l.emp||'')+'</select></div></div>'+
+   '<div class="fg"><div class="fr"><label class="fl">Fornecedor</label><input class="fi" id="li-forn" value="'+escH(l.forn||'')+'"></div><div class="fr"><label class="fl">NIF</label><input class="fi" id="li-nif" value="'+escH(l.nif||'')+'"></div></div>'+
+   '<div class="fr"><label class="fl">Descrição</label><input class="fi" id="li-desc" value="'+escH(l.desc||'')+'"></div>'+
+   '<div class="fg"><div class="fr"><label class="fl">Valor c/ IVA (€) *</label><input class="fi" type="number" id="li-val" value="'+(l.val||'')+'" step="0.01" oninput="calcBase()" onchange="calcBase()"></div><div class="fr"><label class="fl">IVA %</label><select class="fi" id="li-iva" onchange="calcBase()"><option value="0"'+(+iva===0?' selected':'')+'>Isento</option><option value="6"'+(+iva===6?' selected':'')+'>6%</option><option value="13"'+(+iva===13?' selected':'')+'>13%</option><option value="23"'+(+iva===23?' selected':'')+'>23%</option></select></div></div>'+
+   '<div class="fg"><div class="fr"><label class="fl">Valor s/ IVA (base CC)</label><input class="fi" type="number" id="li-base" value="'+(base||'')+'" step="0.01" style="background:var(--bg3);font-weight:600" onchange="updTodosValCC()"></div><div class="fr"><label class="fl">Destino</label><select class="fi" id="li-destino" onchange="togDepart()"><option value="lancado"'+(dst==='lancado'?' selected':'')+'>✓ Lançar</option><option value="aprovacao"'+(dst==='aprovacao'?' selected':'')+'>→ Aprovação</option></select></div></div>'+
+   '<div class="fr" id="li-depart-row" style="'+showDep+'"><label class="fl">Departamento que aprova *</label><select class="fi" id="li-depart" onchange="renderAprovadoresPick()">'+dOpts(l.depart||'')+'</select><div id="li-aprovadores">'+(dst==='aprovacao'?aprovadoresPickHTML(l.depart||'',l.aprovadoresEscolhidos||[]):'')+'</div></div>'+
+   '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px"><label class="fl" style="margin:0">Centros de Custo (valor s/ IVA)</label><div style="display:flex;gap:6px;align-items:center"><span id="cc-tot-disp" style="font-size:11px"></span><button type="button" class="btn btn-sm" onclick="distribuirIgual()">÷</button><button type="button" class="btn btn-sm btn-gold" onclick="addCC()">+ CC</button></div></div>'+ccH+'<div id="cc-w" style="font-size:11px;color:var(--amber);margin-top:3px"></div>';
+}
+
+/* calcula o valor s/IVA a partir do valor c/IVA + taxa */
+function calcBase(){
+  var total=+(($('li-val')||{}).value||0);
+  var iva=+(($('li-iva')||{}).value||0);
+  var base=iva>0?(total/(1+iva/100)):total;
+  var el=$('li-base');if(el)el.value=base?base.toFixed(2):'';
+  updTodosValCC();
+}
+
+/* mostra/esconde a secção de aprovação conforme o destino */
+function togDepart(){
+  var dst=gv('li-destino'),row=$('li-depart-row');
+  if(row)row.style.display=(dst==='aprovacao')?'':'none';
+  if(dst==='aprovacao')renderAprovadoresPick();
+}
+
+/* (1) lista de aprovadores (checkboxes) para o departamento escolhido */
+function aprovadoresPickHTML(dep,pre){
+  pre=pre||[];
+  var cand=USERS.filter(function(u){return u.perfil==='Aprovador'||u.perfil==='Administrador';});
+  if(!cand.length)return '<div class="ab ab-amber" style="font-size:11px;margin-top:6px">Sem utilizadores aprovadores. Crie-os no separador Utilizadores.</div>';
+  var deptList=(typeof DEPT_APROVADORES!=='undefined'&&DEPT_APROVADORES[dep])||[];
+  return '<div style="font-size:11px;color:var(--text2);margin:6px 0 3px">Quem tem de aprovar:</div>'+cand.map(function(u){
+    var on=pre.length?(pre.indexOf(u.email)>=0||pre.indexOf(u.nome)>=0):(deptList.indexOf(u.email)>=0||deptList.indexOf(u.nome)>=0);
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0;cursor:pointer"><input type="checkbox" class="li-aprv-chk" value="'+escH(u.email)+'"'+(on?' checked':'')+'>'+escH(u.nome)+' <span class="tag" style="font-size:9px">'+u.perfil+'</span></label>';
+  }).join('');
+}
+function renderAprovadoresPick(){var box=$('li-aprovadores');if(box)box.innerHTML=aprovadoresPickHTML(gv('li-depart'),[]);}
+
+
+/* ─── Centros de custo usam sempre o valor s/IVA (li-base) ─── */
+function updCCVal(i){var v=+(($('li-base')||{}).value||0),p=$('ccp-'+i),el=$('ccv-'+i);if(p&&el)el.value=(v*(+p.value||0)/100).toFixed(2);mostrarTotalCC();}
+function updCCPct(i){var v=+(($('li-base')||{}).value||0),p=$('ccp-'+i),el=$('ccv-'+i);if(p&&el)p.value=v>0?((+el.value||0)/v*100).toFixed(1):'0';mostrarTotalCC();}
+function updTodosValCC(){var v=+(($('li-base')||{}).value||0);document.querySelectorAll('#ccrows .ccrow').forEach(function(r){var ip=r.querySelectorAll('input');if(ip[0]&&ip[1])ip[1].value=(v*(+ip[0].value||0)/100).toFixed(2);});mostrarTotalCC();}
+function mostrarTotalCC(){var v=+(($('li-base')||{}).value||0),tV=0,tP=0;document.querySelectorAll('#ccrows .ccrow').forEach(function(r){var ip=r.querySelectorAll('input');tP+=ip[0]?+ip[0].value||0:0;tV+=ip[1]?+ip[1].value||0:0;});var d=$('cc-tot-disp');if(d){var ok=v>0&&Math.abs(tV-v)<0.02;d.innerHTML='<span style="color:'+(ok?'var(--green)':'var(--amber)')+'">€'+tV.toFixed(2)+'/€'+v.toFixed(2)+' ('+tP.toFixed(1)+'%)</span>';}}
+
+
+/* ─── Leitura/validação do formulário ─── */
+function lerLanc(){
+  var r=lerCC();
+  var dst=gv('li-destino')||'lancado';
+  var total=+gv('li-val')||0;
+  var iva=+gv('li-iva')||0;
+  var base=+gv('li-base');if(!base)base=iva>0?+(total/(1+iva/100)).toFixed(2):total;
+  var aprovadoresEscolhidos=[];
+  document.querySelectorAll('.li-aprv-chk:checked').forEach(function(c){aprovadoresEscolhidos.push(c.value);});
+  return {ref:gv('li-ref'),data:gv('li-data'),diario:gv('li-diario'),emp:gv('li-emp'),forn:gv('li-forn'),nif:gv('li-nif'),desc:gv('li-desc'),val:total,iva:iva,base:base,depart:gv('li-depart')||'',aprovadoresEscolhidos:aprovadoresEscolhidos,cc:r.cc,ccTot:r.tot,ccTotVal:r.totVal,destino:dst,estado:dst==='aprovacao'?'em aprovação':'lançado',fluxo:[]};
+}
+function validaLanc(d){
+  if(!d.ref){alert('Preencha a Referência.');return false;}
+  if(!d.emp){alert('Selecione a Empresa.');return false;}
+  var alvo=+d.base||+d.val||0;
+  if(d.cc.length&&Math.abs(d.ccTotVal-alvo)>0.05){var w=$('cc-w');if(w)w.textContent='⚠ Total dos CC ≠ valor s/ IVA (€'+alvo.toFixed(2)+')';return false;}
+  if(d.destino==='aprovacao'&&!d.depart){alert('Selecione o departamento que vai aprovar.');return false;}
+  return true;
+}
+
+/* aloca o valor s/IVA (base) às rubricas do P&L */
+function atualizarOrcDoLanc(l,op){
+  if(!l||!l.cc||!l.cc.length||!l.emp)return;
+  var ano=l.data?new Date(l.data).getFullYear():new Date().getFullYear();
+  var sn=op==='remover'?-1:1;
+  l.cc.forEach(function(c){
+    var rub=CC_RUBRICA_MAP[c.ccId];if(!rub)return;
+    var parcial=(+c.valor||0)*sn;
+    var cur=plG(ano,l.emp,rub);plS(ano,l.emp,rub,'real',Math.max(0,(cur.real||0)+parcial));
+    var curC=plG(ano,'Consolidado',rub);plS(ano,'Consolidado',rub,'real',Math.max(0,(curC.real||0)+parcial));
+  });
+}
+
+/* envia o lançamento para o separador Faturas (em aprovação) */
+function enviarLancParaAprovacao(d){
+  var fo=FORN.filter(function(f){return d.forn&&f.nome.toLowerCase()===String(d.forn).toLowerCase();})[0];
+  var nova={id:'F'+IDS.f++,ref:d.ref,data:d.data,fId:fo?fo.id:'',fNome:d.forn||'',nif:d.nif||'',emp:d.emp,depart:d.depart||'',val:+d.val||0,iva:d.iva,desc:d.desc||'',estado:'em aprovação',aprvBy:'',dtAprov:'',fluxo:[],origem:'lancamento',lancPayload:d,lancMaterializado:false,aprovadoresEscolhidos:d.aprovadoresEscolhidos||[]};
+  if(typeof registaFluxo==='function')registaFluxo(nova,'em aprovação','Enviado da área de Lançamentos');
+  FATURAS.push(nova);if(typeof sbFat==='function')sbFat(nova);if(typeof sbSaveConfig==='function')sbSaveConfig('IDS',IDS);
+  return nova;
+}
+
+/* (1) quem pode agir: respeita os aprovadores escolhidos; senão usa o departamento */
+function fatPodeAgir(f){
+  if(ehAdmin())return true;
+  if(!podeAprovar('fat'))return false;
+  var lista=(f.aprovadoresEscolhidos&&f.aprovadoresEscolhidos.length)?f.aprovadoresEscolhidos:(DEPT_APROVADORES[f.depart]||[]);
+  return lista.indexOf(CU.nome)>=0||lista.indexOf(CU.email)>=0;
+}
+
+function saveLanc(){
+  if(!guardEdit())return;
+  var d=lerLanc();
+  if(!validaLanc(d))return;
+  if(d.destino==='aprovacao'){enviarLancParaAprovacao(d);cM();alert('Enviado para aprovação — disponível no separador Faturas.');nav('fat');return;}
+  d.id='L'+IDS.lanc++;d.alocado=false;LANCS.push(d);
+  atualizarOrcDoLanc(d,'adicionar');d.alocado=true;
+  if(typeof sbLanc==='function')sbLanc(d);if(typeof sbSaveConfig==='function')sbSaveConfig('IDS',IDS);
+  cM();pgLanc();
+}
+function updLanc(id){
+  if(!guardEdit())return;
+  var ix=-1;LANCS.forEach(function(x,i){if(x.id===id)ix=i;});
+  if(ix<0)return;
+  var old=LANCS[ix],d=lerLanc();
+  if(!validaLanc(d))return;
+  if(old.alocado)atualizarOrcDoLanc(old,'remover');
+  if(d.destino==='aprovacao'){LANCS.splice(ix,1);if(typeof sbDelete==='function')sbDelete('lancamentos',id);enviarLancParaAprovacao(d);cM();alert('Enviado para aprovação — disponível no separador Faturas.');nav('fat');return;}
+  d.id=id;d.alocado=false;LANCS[ix]=d;
+  atualizarOrcDoLanc(d,'adicionar');d.alocado=true;
+  if(typeof sbLanc==='function')sbLanc(d);cM();pgLanc();
+}
+
+
+/* ─── (3) UPLOAD IA + botão Confirmar ─── */
+function mUploadLanc(){
+  if(!guardEdit())return;window._upFileData=null;
+  modal('<div style="background:var(--bg2);border-radius:var(--rl);border:1px solid var(--border);width:660px;max-height:88vh;overflow-y:auto"><div class="mh"><span class="mt">Upload IA</span><button class="ib" onclick="cM()">'+iX()+'</button></div><div class="mb"><div style="border:2px dashed var(--border2);border-radius:var(--r);padding:16px;text-align:center;margin-bottom:11px;cursor:pointer" onclick="document.getElementById(\'upl-fi\').click()"><div style="font-size:24px">📄</div><div style="font-size:12px;font-weight:600">Selecionar PDF/Imagem</div><input type="file" id="upl-fi" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="onUplFile(this)"><div id="upl-st" style="font-size:12px;color:var(--golddim);margin-top:4px"></div></div>'+buildLancForm({})+'</div><div class="mf"><button class="btn" onclick="cM()">Cancelar</button><button class="btn btn-gold" onclick="confUpload()">✓ Confirmar</button></div></div>');
+}
+
+function onUplFile(inp){
+  if(!inp||!inp.files||!inp.files[0])return;
+  var file=inp.files[0];var st=$('upl-st');
+  if(st)st.innerHTML='<span style="color:var(--amber)">⏳ A extrair...</span>';
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var b64=e.target.result.split(',')[1];
+    var mt=file.type||'application/pdf';
+    window._upFileData={nome:file.name,tipo:mt,b64:e.target.result,tamanho:formatBytes(file.size),data:new Date().toLocaleDateString('pt-PT')};
+    if(!(typeof SB!=='undefined'&&SB&&SB.functions)){
+      if(st)st.innerHTML='<span style="color:var(--amber)">⚠ Extração IA indisponível. Preencha manualmente.</span>';
+      sv('li-desc',file.name);calcBase();return;
+    }
+    SB.functions.invoke('extrair-fatura',{body:{b64:b64,mediaType:mt,isPdf:mt.indexOf('pdf')>=0}}).then(function(res){
+      if(res.error)throw res.error;
+      var txt=(res.data&&res.data.texto)||'';
+      txt=txt.replace(new RegExp('\u0060\u0060\u0060json|\u0060\u0060\u0060','g'),'').trim();
+      var m=txt.match(/\{[\s\S]*\}/),c={};
+      if(m)try{c=JSON.parse(m[0]);}catch(ex){}
+      if(st)st.innerHTML=(c.fornecedor||c.valor)?'<span style="color:var(--green)">✓ Extraído!</span>':'<span style="color:var(--amber)">⚠ Preencha manualmente.</span>';
+      if(c.fornecedor)sv('li-forn',c.fornecedor);
+      if(c.nif)sv('li-nif',c.nif);
+      if(c.valor)sv('li-val',String(c.valor).replace(/[^\d.,\-]/g,'').replace(',','.'));
+      if(c.iva!=null&&c.iva!=='')sv('li-iva',String(c.iva));
+      if(c.data)sv('li-data',c.data);
+      if(c.referencia)sv('li-ref',c.referencia);
+      sv('li-desc',c.descricao||file.name);
+      calcBase();
+    }).catch(function(err){
+      console.error('extrair-fatura',err);
+      if(st)st.innerHTML='<span style="color:var(--amber)">⚠ Erro na extração. Preencha manualmente.</span>';
+      sv('li-desc',file.name);calcBase();
+    });
+  };
+  reader.readAsDataURL(file);
+}
+function confUpload(){
+  if(!guardEdit())return;
+  var d=lerLanc();
+  if(!validaLanc(d))return;
+  if(window._upFileData){
+    if(typeof arquivarDocumento==='function'){
+      var doc=arquivarDocumento(d,window._upFileData);
+      d.anexo=doc&&doc.anexo?{nome:doc.nome,tipo:doc.anexo.tipo,b64:doc.anexo.b64,tamanho:doc.anexo.tamanho}:{nome:window._upFileData.nome,tipo:window._upFileData.tipo,b64:window._upFileData.b64,tamanho:window._upFileData.tamanho};
+    }else{
+      d.anexo={nome:window._upFileData.nome,tipo:window._upFileData.tipo,b64:window._upFileData.b64,tamanho:window._upFileData.tamanho};
+    }
+  }
+  if(d.destino==='aprovacao'){enviarLancParaAprovacao(d);window._upFileData=null;cM();alert('Documento processado e enviado para aprovação (separador Faturas).');nav('fat');return;}
+  d.id='L'+IDS.lanc++;d.alocado=false;LANCS.push(d);
+  atualizarOrcDoLanc(d,'adicionar');d.alocado=true;
+  if(typeof sbLanc==='function')sbLanc(d);if(typeof sbSaveConfig==='function')sbSaveConfig('IDS',IDS);
+  window._upFileData=null;cM();pgLanc();
+}
 </script>
 </body>
 </html>
