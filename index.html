@@ -1701,12 +1701,43 @@ function confUpload(){
   if(!guardEdit())return;
   var d=lerLanc();
   if(!validaLanc(d))return;
+
+  function continuar(){
+    if(d.destino==='aprovacao'){
+      enviarLancParaAprovacao(d);
+      window._upFileData=null;cM();
+      alert('Documento processado e enviado para aprovação (separador Faturas).');
+      nav('fat');return;
+    }
+    d.id='L'+IDS.lanc++;d.alocado=false;LANCS.push(d);
+    atualizarOrcDoLanc(d,'adicionar');d.alocado=true;
+    if(typeof sbLanc==='function')sbLanc(d);
+    if(typeof sbSaveConfig==='function')sbSaveConfig('IDS',IDS);
+    window._upFileData=null;cM();pgLanc();
+  }
+
+  // Se há ficheiro carregado, envia-o para a pasta do Drive
   if(window._upFileData){
-    if(typeof arquivarDocumento==='function'){
-      var doc=arquivarDocumento(d,window._upFileData);
-      d.anexo=doc&&doc.anexo?{nome:doc.nome,tipo:doc.anexo.tipo,b64:doc.anexo.b64,tamanho:doc.anexo.tamanho}:{nome:window._upFileData.nome,tipo:window._upFileData.tipo,b64:window._upFileData.b64,tamanho:window._upFileData.tamanho};
+    if(_gd.ligado&&_gd.token){
+      var st=$('upl-st');if(st)st.innerHTML='<span style="color:var(--amber)">☁ A enviar para o Drive…</span>';
+      gdUploadArquivo(window._upFileData,function(r){
+        if(r){
+          d.anexo={nome:window._upFileData.nome,tipo:window._upFileData.tipo,tamanho:window._upFileData.tamanho,driveId:r.id,driveLink:r.link};
+          gdToast('Fatura enviada para o Drive ✓');
+        }else{
+          d.anexo={nome:window._upFileData.nome,tipo:window._upFileData.tipo,b64:window._upFileData.b64,tamanho:window._upFileData.tamanho};
+        }
+        continuar();
+      });
+      return; // espera o callback do upload antes de continuar
     }else{
+      // Drive não ligado: guarda o anexo localmente para não perder
       d.anexo={nome:window._upFileData.nome,tipo:window._upFileData.tipo,b64:window._upFileData.b64,tamanho:window._upFileData.tamanho};
+      gdToast('Drive não ligado — anexo guardado localmente',true);
+    }
+  }
+  continuar();
+}
     }
 /* 1) pgLanc - pagina de lista dos Lancamentos (estava em falta -> causava o crash) */
 function pgLanc(){
