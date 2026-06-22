@@ -1879,7 +1879,6 @@ function verAnexo(a){
   else corpo='<div style="color:#aaa;text-align:center;padding:30px"><div style="font-size:48px">DOC</div><div style="margin-top:10px">'+escH(a.nome)+'</div>'+(a.driveLink?'<a href="'+a.driveLink+'" target="_blank" class="btn btn-gold" style="margin-top:12px">Abrir no Drive</a>':'')+'</div>';
   modal('<div style="background:var(--bg2);border-radius:var(--rl);border:1px solid var(--border);width:660px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column"><div class="mh"><span class="mt">'+escH(a.nome)+'</span><div style="display:flex;gap:5px">'+btnDrive+btnDl+'<button class="ib" onclick="cM()">'+iX()+'</button></div></div><div style="flex:1;overflow:auto;padding:14px;background:#111;display:flex;align-items:center;justify-content:center">'+corpo+'</div></div>');
 }
-  }
   if(d.destino==='aprovacao'){enviarLancParaAprovacao(d);window._upFileData=null;cM();alert('Documento processado e enviado para aprovação (separador Faturas).');nav('fat');return;}
   d.id='L'+IDS.lanc++;d.alocado=false;LANCS.push(d);
   atualizarOrcDoLanc(d,'adicionar');d.alocado=true;
