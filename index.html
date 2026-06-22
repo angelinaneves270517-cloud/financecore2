@@ -1465,7 +1465,7 @@ function pgOrc(){
   h+='<div class="kg">'+kpi('Vendas Produto','€'+fmt(vp),'Final 2026',true)+kpi('Margem Bruta','€'+fmt(mb),(vp?Math.round(mb/vp*100):0)+'%',true)+kpi('P.A.C.','€'+fmt(pac),(vp?Math.round(pac/vp*100):0)+'%',true)+kpi('Rubricas',PL_RUBRICAS.filter(function(r){return r.t!=='sec';}).length,'')+'</div>';
   var COLS=[['r24','Real 2024'],['r25','Real 2025'],['prev','Previsão 2026'],['rst','Restaurante 2026'],['fin','Final 2026'],['merc','Ind. Mercado']];
   var base={};COLS.forEach(function(c){base[c[0]]=plxRow(PL_REST,PL_MES2,'VENDAS DE PRODUTO')[c[0]]||0;});
-  base.rst=liveMap['VENDAS DE PRODUTO']||0;
+ base.rst=(plxRow(PL_REST,PL_MES2,'VENDAS DE PRODUTO').rst||0)+(liveMap['VENDAS DE PRODUTO']||0);
   h+='<div class="tw" style="overflow-x:auto"><table class="pl-tbl" style="min-width:1100px"><thead><tr style="background:var(--bg3)"><th rowspan="2" style="padding:6px 8px;position:sticky;left:0;background:var(--bg3);min-width:200px;font-size:10px;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border)">Rubrica</th>';
   COLS.forEach(function(c){h+='<th colspan="2" style="text-align:center;font-size:10px;text-transform:uppercase;color:'+(c[0]==='rst'?'var(--blue)':'var(--text3)')+';border-bottom:1px solid var(--border);border-left:1px solid var(--border);padding:4px">'+c[1]+(c[0]==='rst'?' ⚙':'')+'</th>';});
   h+='<th colspan="2" style="text-align:center;font-size:10px;text-transform:uppercase;color:var(--golddim);border-bottom:1px solid var(--border);border-left:1px solid var(--border);padding:4px">Variação</th></tr><tr style="background:var(--bg3)">';
@@ -1479,9 +1479,18 @@ function pgOrc(){
     h+='<tr class="'+(isP?'pl-pac':isB?'pl-tot':'')+'"><td class="'+(r.t==='det'?'pl-det':'')+'" style="position:sticky;left:0;background:'+bg+';color:'+(isP?'var(--golddim)':'inherit')+'">'+r.l+'</td>';
     COLS.forEach(function(c){
       if(c[0]==='rst'){
+     if(c[0]==='rst'){
         var lv=liveMap[r.l]||0;
-        h+='<td style="text-align:right;border-left:1px solid var(--border);padding:5px 6px;background:rgba(26,95,160,.06)" title="Automático — lançamentos imputados">'+(lv?fmt(Math.round(lv)):'—')+'</td>';
-        h+='<td style="text-align:right;font-size:10px;color:var(--text3);padding:5px 6px">'+(lv&&base.rst?(lv/base.rst*100).toFixed(1)+'%':'')+'</td>';
+        var man=plxRow(PL_REST,PL_MES2,r.l).rst||0;
+        var tot=man+lv;
+        var temMan=man!==0;
+        var bgCel=temMan?'rgba(181,98,10,.10)':'rgba(26,95,160,.06)';
+        if(ed){
+          h+='<td style="padding:2px;text-align:right;border-left:1px solid var(--border);background:'+bgCel+'" title="Manual: '+fmt(Math.round(man))+' + Faturas: '+fmt(Math.round(lv))+'"><input type="number" value="'+(man||'')+'" placeholder="0" style="width:72px;text-align:right;border:1px solid '+(temMan?'var(--amber)':'var(--border)')+';border-radius:3px;padding:2px 3px;font-size:11px;background:var(--bg)" onchange="plxSet(\''+PL_REST+'\','+PL_MES2+',\''+esc+'\',\'rst\',this.value);pgOrc()">'+(lv?'<div style="font-size:9px;color:var(--blue);margin-top:1px">+'+fmt(Math.round(lv))+' fat.</div>':'')+'</td>';
+        }else{
+          h+='<td style="text-align:right;border-left:1px solid var(--border);padding:5px 6px;background:'+bgCel+'" title="Manual: '+fmt(Math.round(man))+' + Faturas: '+fmt(Math.round(lv))+'">'+(tot?fmt(Math.round(tot)):'—')+(temMan?' ✎':'')+'</td>';
+        }
+        h+='<td style="text-align:right;font-size:10px;color:var(--text3);padding:5px 6px">'+(tot&&base.rst?(tot/base.rst*100).toFixed(1)+'%':'')+'</td>';
         return;
       }
       var v=plxRow(PL_REST,PL_MES2,r.l)[c[0]]||0;
