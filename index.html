@@ -1717,6 +1717,10 @@ function confUpload(){
   if(window._upFileData){
     if(_gd.ligado&&_gd.token){
       var st=$('upl-st');if(st)st.innerHTML='<span style="color:var(--amber)">A enviar para o Drive…</span>';
+      var hoje=new Date();
+      var meses=['01-Janeiro','02-Fevereiro','03-Março','04-Abril','05-Maio','06-Junho','07-Julho','08-Agosto','09-Setembro','10-Outubro','11-Novembro','12-Dezembro'];
+      var subpastas=[String(hoje.getFullYear()),d.emp||'Sem-Restaurante',meses[hoje.getMonth()],d.diario||'Sem-Diario'];
+      var nomeFinal=_nomeFaturaDrive(d,window._upFileData.nome);
       gdUploadArquivo(window._upFileData,function(r){
         if(r){
           d.anexo={nome:window._upFileData.nome,tipo:window._upFileData.tipo,tamanho:window._upFileData.tamanho,driveId:r.id,driveLink:r.link};
@@ -1725,7 +1729,7 @@ function confUpload(){
           d.anexo={nome:window._upFileData.nome,tipo:window._upFileData.tipo,b64:window._upFileData.b64,tamanho:window._upFileData.tamanho};
         }
         continuar();
-      });
+      },{subpastas:subpastas,nomeFinal:nomeFinal});
       return;
     }else{
       d.anexo={nome:window._upFileData.nome,tipo:window._upFileData.tipo,b64:window._upFileData.b64,tamanho:window._upFileData.tamanho};
@@ -1733,6 +1737,88 @@ function confUpload(){
     }
   }
   continuar();
+}
+
+function _limpaNome(s,max){
+  s=String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  s=s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'-').replace(/-+/g,'-');
+  s=s.replace(/^-+|-+$/g,'');
+  if(max&&s.length>max)s=s.substring(0,max).replace(/-+$/,'');
+  return s||'-';
+}
+
+function _nomeFaturaDrive(d,fileNome){
+  var ext='';var p=String(fileNome||'').lastIndexOf('.');
+  if(p>=0)ext=fileNome.substring(p);
+  var forn=_limpaNome(d.forn,40)||'SemForn';
+  var ref=_limpaNome(d.ref,30)||'SemRef';
+  var desc=_limpaNome(d.desc,30);
+  var val=(+d.val||0).toFixed(2);
+  var partes=[forn,ref];
+  if(desc&&desc!=='-')partes.push(desc);
+  partes.push(val);
+  return partes.join('_')+ext;
+}
+
+function _gdSubpasta(nome,parentId,cb){
+  var q="mimeType='application/vnd.google-apps.folder' and name='"+nome.replace(/'/g,"\\'")+"' and '"+parentId+"' in parents and trashed=false";
+  gapi.client.drive.files.list({q:q,fields:'files(id)',pageSize:1}).then(function(r){
+    var fs=(r.result&&r.result.files)||[];
+    if(fs.length){cb(fs[0].id);return;}
+    gapi.client.drive.files.create({
+      resource:{name:nome,mimeType:'application/vnd.google-apps.folder',parents:[parentId]},
+      fields:'id'
+    }).then(function(rr){cb((rr.result&&rr.result.id)||parentId);})
+      .catch(function(e){console.error('criar subpasta '+nome,e);cb(parentId);});
+  }).catch(function(e){console.error('listar subpasta '+nome,e);cb(parentId);});
+}
+
+function _gdCadeiaPastas(baseId,nomes,cb){
+  var i=0;
+  function passo(parentId){
+    if(i>=nomes.length){cb(parentId);return;}
+    var nome=nomes[i++];
+    _gdSubpasta(nome,parentId,function(fid){passo(fid);});
+  }
+  passo(baseId);
+}
+
+function gdUploadArquivo(file,onDone,opts){
+     function gdUploadArquivo(file,onDone,opts){
+  opts=opts||{};
+  if(!_gd.ligado||!_gd.token){
+    alert('Ligue primeiro o Google Drive (botão Ligar Drive no topo).');
+    if(onDone)onDone(null);return;
+  }
+  gapi.client.setToken({access_token:_gd.token});
+  _gdEnsureFolderArquivo(function(baseId){
+    if(!baseId){if(onDone)onDone(null);return;}
+    var subs=opts.subpastas||[];
+    _gdCadeiaPastas(baseId,subs,function(folderId){
+      var raw=String(file.b64||'');
+      var base64=raw.indexOf(',')>=0?raw.split(',')[1]:raw;
+      var nomeFinal=opts.nomeFinal||file.nome;
+      var meta={name:nomeFinal,mimeType:file.tipo||'application/octet-stream'};
+      if(folderId)meta.parents=[folderId];
+      var boundary='-------fcdoc'+Date.now();
+      var body='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)+
+               '\r\n--'+boundary+'\r\nContent-Type: '+meta.mimeType+'\r\nContent-Transfer-Encoding: base64\r\n\r\n'+base64+
+               '\r\n--'+boundary+'--';
+      gapi.client.request({
+        path:'/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+        method:'POST',
+        headers:{'Content-Type':'multipart/related; boundary="'+boundary+'"'},
+        body:body
+      }).then(function(res){
+        var r=res.result||{};
+        if(onDone)onDone({id:r.id,name:r.name,link:r.webViewLink});
+      }).catch(function(e){
+        console.error('gdUploadArquivo',e);gdToast('Erro ao enviar para o Drive',true);
+        if(onDone)onDone(null);
+      });
+    });
+  });
+}
 }
 /* 1) pgLanc - pagina de lista dos Lancamentos (estava em falta -> causava o crash) */
 function pgLanc(){
