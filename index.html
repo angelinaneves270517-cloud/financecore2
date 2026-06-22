@@ -1784,7 +1784,6 @@ function _gdCadeiaPastas(baseId,nomes,cb){
 }
 
 function gdUploadArquivo(file,onDone,opts){
-     function gdUploadArquivo(file,onDone,opts){
   opts=opts||{};
   if(!_gd.ligado||!_gd.token){
     alert('Ligue primeiro o Google Drive (botão Ligar Drive no topo).');
@@ -1895,38 +1894,6 @@ function _gdEnsureFolderArquivo(cb){
       .catch(function(){appFolder();});
   }else appFolder();
 }
-
-/* Envia um ficheiro (data URL base64) para o Drive -> onDone({id,name,link}) */
-function gdUploadArquivo(file,onDone){
-  if(!_gd.ligado||!_gd.token){
-    alert('Ligue primeiro o Google Drive (botao Ligar Drive no topo).');
-    if(onDone)onDone(null);return;
-  }
-  gapi.client.setToken({access_token:_gd.token});
-  _gdEnsureFolderArquivo(function(folderId){
-    var raw=String(file.b64||'');
-    var base64=raw.indexOf(',')>=0?raw.split(',')[1]:raw;
-    var meta={name:file.nome,mimeType:file.tipo||'application/octet-stream'};
-    if(folderId)meta.parents=[folderId];
-    var boundary='-------fcdoc'+Date.now();
-    var body='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)+
-             '\r\n--'+boundary+'\r\nContent-Type: '+meta.mimeType+'\r\nContent-Transfer-Encoding: base64\r\n\r\n'+base64+
-             '\r\n--'+boundary+'--';
-    gapi.client.request({
-      path:'/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
-      method:'POST',
-      headers:{'Content-Type':'multipart/related; boundary="'+boundary+'"'},
-      body:body
-    }).then(function(res){
-      var r=res.result||{};
-      if(onDone)onDone({id:r.id,name:r.name,link:r.webViewLink});
-    }).catch(function(e){
-      console.error('gdUploadArquivo',e);gdToast('Erro ao enviar para o Drive',true);
-      if(onDone)onDone(null);
-    });
-  });
-}
-
 /* Guardar documento: se o Drive estiver ligado, envia para la e guarda o link;
    senao guarda localmente como antes (nada se perde). */
 function saveDoc(){
