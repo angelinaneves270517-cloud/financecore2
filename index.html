@@ -1478,7 +1478,6 @@ function pgOrc(){
     var esc=r.l.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     h+='<tr class="'+(isP?'pl-pac':isB?'pl-tot':'')+'"><td class="'+(r.t==='det'?'pl-det':'')+'" style="position:sticky;left:0;background:'+bg+';color:'+(isP?'var(--golddim)':'inherit')+'">'+r.l+'</td>';
     COLS.forEach(function(c){
-      if(c[0]==='rst'){
      if(c[0]==='rst'){
         var lv=liveMap[r.l]||0;
         var man=plxRow(PL_REST,PL_MES2,r.l).rst||0;
