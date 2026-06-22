@@ -1708,11 +1708,6 @@ function confUpload(){
     }else{
       d.anexo={nome:window._upFileData.nome,tipo:window._upFileData.tipo,b64:window._upFileData.b64,tamanho:window._upFileData.tamanho};
     }
-    /* BLOCO FINAL - colar antes do ultimo </script>, depois de confUpload.
-   Adiciona o que falta: pgLanc (lista de Lancamentos), Arquivo no Drive,
-   e a fatura lancada a alimentar a coluna Restaurante 2026. */
-
-
 /* 1) pgLanc - pagina de lista dos Lancamentos (estava em falta -> causava o crash) */
 function pgLanc(){
   var C=$('content');
