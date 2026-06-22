@@ -1708,6 +1708,156 @@ function confUpload(){
     }else{
       d.anexo={nome:window._upFileData.nome,tipo:window._upFileData.tipo,b64:window._upFileData.b64,tamanho:window._upFileData.tamanho};
     }
+    /* BLOCO FINAL - colar antes do ultimo </script>, depois de confUpload.
+   Adiciona o que falta: pgLanc (lista de Lancamentos), Arquivo no Drive,
+   e a fatura lancada a alimentar a coluna Restaurante 2026. */
+
+
+/* 1) pgLanc - pagina de lista dos Lancamentos (estava em falta -> causava o crash) */
+function pgLanc(){
+  var C=$('content');
+  if(!LANCS.length){
+    C.innerHTML='<div style="text-align:center;padding:40px;background:var(--bg2);border-radius:var(--rl);border:1px solid var(--border)">'+(podeEditar()?'<button class="btn btn-gold" onclick="mNovoLanc()">+ Lancamento</button>':'<div style="color:var(--text3)">Sem lancamentos.</div>')+'</div>';
+    return;
+  }
+  var totL=LANCS.reduce(function(s,l){return s+(+l.val||0);},0);
+  var nLanc=LANCS.filter(function(l){return l.estado==='lançado';}).length;
+  var nAprov=LANCS.filter(function(l){return l.estado==='em aprovação';}).length;
+  var h='<div class="kg">'+kpi('Lancamentos',LANCS.length,'')+kpi('Lancados',nLanc,'')+kpi('Em aprovacao',nAprov,'')+kpi('Total c/IVA','€'+fmt(totL.toFixed(0)),'',true)+'</div>';
+  h+='<div class="tw" style="overflow-x:auto"><table class="tbl" style="min-width:980px"><thead><tr><th>Ref.</th><th>Data</th><th>Diario</th><th>Empresa</th><th>Fornecedor</th><th style="text-align:right">Valor c/IVA</th><th style="text-align:right">Base s/IVA</th><th>CC</th><th>Estado</th><th></th></tr></thead><tbody>';
+  LANCS.slice().reverse().forEach(function(l){
+    var ccTxt=(l.cc||[]).map(function(c){return c.ccId;}).join(', ')||'—';
+    h+='<tr><td style="font-weight:500;color:var(--golddim)">'+escH(l.ref)+'</td><td style="font-size:11px">'+fd(l.data)+'</td><td style="font-size:11px">'+escH(l.diario||'—')+'</td><td>'+escH(l.emp||'—')+'</td><td>'+escH(l.forn||'—')+'</td><td style="text-align:right;font-weight:600">€'+fmt(+l.val||0)+'</td><td style="text-align:right;color:var(--text2)">'+(l.base?'€'+fmt(l.base):'—')+'</td><td style="font-size:11px">'+escH(ccTxt)+'</td><td>'+estBdg(l.estado)+'</td><td><div style="display:flex;gap:2px">'+ibEd('mEditLanc(\''+l.id+'\')')+ibDel('delLanc(\''+l.id+'\')')+'</div></td></tr>';
+  });
+  h+='</tbody></table></div>';
+  C.innerHTML=h;
+}
+
+
+/* 2) avancarFat - ao "Lancar", a fatura vinda de um lancamento materializa-se
+   num lancamento real (com CC), alimentando a coluna Restaurante 2026 do P&L */
+function avancarFat(id,est,nota){
+  var f=FATURAS.filter(function(x){return x.id===id;})[0];if(!f)return;
+  if(!fatPodeAgir(f)){alert('Nao e aprovador do departamento "'+(f.depart||'—')+'".');return;}
+  if(est==='anulado'){f.estado='anulado';registaFluxo(f,'anulado',nota||'Recusada');sbFat(f);pgFat();return;}
+  if(est==='devolver'){var ordem=['pendente','em aprovação','aprovado','lançado'];var ix=ordem.indexOf(f.estado);f.estado=ix>0?ordem[ix-1]:'pendente';registaFluxo(f,f.estado,nota||'Devolvida para correcao');sbFat(f);pgFat();return;}
+  if(est==='em aprovação'){f.estado='em aprovação';registaFluxo(f,'em aprovação',nota);sbFat(f);pgFat();return;}
+  if(est==='aprovado'){
+    if(fatJaAprovou(f)){alert('Ja aprovou esta fatura. Falta aprovacao de outro responsavel.');return;}
+    registaFluxo(f,'aprovado',nota);
+    var dadas=fatAprovacoesDadas(f),exig=fatNivelExigido(f.val);
+    if(dadas>=exig){f.estado='aprovado';f.aprvBy=CU.nome;f.dtAprov=new Date().toLocaleDateString('pt-PT');}
+    else f.estado='em aprovação';
+    sbFat(f);pgFat();return;
+  }
+  if(est==='lançado'){
+    f.estado='lançado';registaFluxo(f,'lançado',nota);
+    if(f.origem==='lancamento'&&f.lancPayload&&!f.lancMaterializado){
+      var d=f.lancPayload;d.id='L'+IDS.lanc++;d.estado='lançado';d.destino='lancado';d.alocado=false;
+      LANCS.push(d);atualizarOrcDoLanc(d,'adicionar');d.alocado=true;f.lancMaterializado=true;
+      if(typeof sbLanc==='function')sbLanc(d);if(typeof sbSaveConfig==='function')sbSaveConfig('IDS',IDS);
+    }
+    sbFat(f);pgFat();return;
+  }
+}
+
+
+/* 3) ARQUIVO DIGITAL -> GOOGLE DRIVE
+   Os documentos carregados no separador Arquivo Digital vao para o Drive. */
+
+/* Garante a pasta de destino: usa CFG.driveFolder se a app tiver acesso,
+   senao cria/usa uma pasta propria "FinanceCore - Arquivo Digital". */
+function _gdEnsureFolderArquivo(cb){
+  var fid=(CFG&&CFG.driveFolder)||'';
+  function appFolder(){
+    gapi.client.drive.files.list({
+      q:"mimeType='application/vnd.google-apps.folder' and appProperties has { key='fcapp' and value='arquivo' } and trashed=false",
+      fields:'files(id)',pageSize:1
+    }).then(function(r){
+      var fs=(r.result&&r.result.files)||[];
+      if(fs.length){cb(fs[0].id);return;}
+      return gapi.client.drive.files.create({
+        resource:{name:'FinanceCore - Arquivo Digital',mimeType:'application/vnd.google-apps.folder',appProperties:{fcapp:'arquivo'}},
+        fields:'id'
+      }).then(function(rr){cb((rr.result&&rr.result.id)||'');});
+    }).catch(function(e){console.error('app folder',e);cb('');});
+  }
+  if(fid){
+    gapi.client.drive.files.get({fileId:fid,fields:'id'})
+      .then(function(){cb(fid);})
+      .catch(function(){appFolder();});
+  }else appFolder();
+}
+
+/* Envia um ficheiro (data URL base64) para o Drive -> onDone({id,name,link}) */
+function gdUploadArquivo(file,onDone){
+  if(!_gd.ligado||!_gd.token){
+    alert('Ligue primeiro o Google Drive (botao Ligar Drive no topo).');
+    if(onDone)onDone(null);return;
+  }
+  gapi.client.setToken({access_token:_gd.token});
+  _gdEnsureFolderArquivo(function(folderId){
+    var raw=String(file.b64||'');
+    var base64=raw.indexOf(',')>=0?raw.split(',')[1]:raw;
+    var meta={name:file.nome,mimeType:file.tipo||'application/octet-stream'};
+    if(folderId)meta.parents=[folderId];
+    var boundary='-------fcdoc'+Date.now();
+    var body='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)+
+             '\r\n--'+boundary+'\r\nContent-Type: '+meta.mimeType+'\r\nContent-Transfer-Encoding: base64\r\n\r\n'+base64+
+             '\r\n--'+boundary+'--';
+    gapi.client.request({
+      path:'/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+      method:'POST',
+      headers:{'Content-Type':'multipart/related; boundary="'+boundary+'"'},
+      body:body
+    }).then(function(res){
+      var r=res.result||{};
+      if(onDone)onDone({id:r.id,name:r.name,link:r.webViewLink});
+    }).catch(function(e){
+      console.error('gdUploadArquivo',e);gdToast('Erro ao enviar para o Drive',true);
+      if(onDone)onDone(null);
+    });
+  });
+}
+
+/* Guardar documento: se o Drive estiver ligado, envia para la e guarda o link;
+   senao guarda localmente como antes (nada se perde). */
+function saveDoc(){
+  if(!guardEdit())return;
+  var n=gv('do-nome'),e=gv('do-emp');
+  if(!n||!e){alert('Nome e empresa.');return;}
+  var base={id:'A'+IDS.dc++,nome:n,tipo:gv('do-tipo')||'outro',emp:e,valid:gv('do-valid'),val:+gv('do-val')||0,anexo:null};
+  var fi=$('do-file');
+  function finalizar(){ARQUIVO.push(base);if(typeof sbDoc==='function')sbDoc(base);if(typeof sbSaveConfig==='function')sbSaveConfig('IDS',IDS);cM();pgArq();}
+  if(fi&&fi.files&&fi.files[0]){
+    var f=fi.files[0],rd=new FileReader();
+    rd.onload=function(ev){
+      var fileObj={nome:f.name,tipo:f.type||'application/octet-stream',b64:ev.target.result,tamanho:formatBytes(f.size)};
+      if(_gd.ligado&&_gd.token){
+        gdUploadArquivo(fileObj,function(r){
+          if(r){base.anexo={nome:fileObj.nome,tipo:fileObj.tipo,tamanho:fileObj.tamanho,driveId:r.id,driveLink:r.link};gdToast('Documento enviado para o Drive');}
+          else{base.anexo=fileObj;}
+          finalizar();
+        });
+      }else{base.anexo=fileObj;finalizar();}
+    };
+    rd.readAsDataURL(f);
+  }else finalizar();
+}
+
+/* Visualizar anexo: se estiver no Drive abre o Drive; senao mostra inline. */
+function verAnexo(a){
+  if(!a)return;
+  if(a.driveLink&&!a.b64){window.open(a.driveLink,'_blank');return;}
+  var isI=a.tipo&&a.tipo.indexOf('image/')===0,isP=a.tipo==='application/pdf';
+  var btnDrive=a.driveLink?'<a href="'+a.driveLink+'" target="_blank" class="btn btn-sm btn-blue">Drive</a>':'';
+  var btnDl=a.b64?'<a href="'+a.b64+'" download="'+a.nome+'" class="btn btn-sm btn-blue">Descarregar</a>':'';
+  var corpo;
+  if(a.b64&&isI)corpo='<img src="'+a.b64+'" style="max-width:100%;max-height:70vh">';
+  else if(a.b64&&isP)corpo='<iframe src="'+a.b64+'" style="width:100%;height:70vh;border:none"></iframe>';
+  else corpo='<div style="color:#aaa;text-align:center;padding:30px"><div style="font-size:48px">DOC</div><div style="margin-top:10px">'+escH(a.nome)+'</div>'+(a.driveLink?'<a href="'+a.driveLink+'" target="_blank" class="btn btn-gold" style="margin-top:12px">Abrir no Drive</a>':'')+'</div>';
+  modal('<div style="background:var(--bg2);border-radius:var(--rl);border:1px solid var(--border);width:660px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column"><div class="mh"><span class="mt">'+escH(a.nome)+'</span><div style="display:flex;gap:5px">'+btnDrive+btnDl+'<button class="ib" onclick="cM()">'+iX()+'</button></div></div><div style="flex:1;overflow:auto;padding:14px;background:#111;display:flex;align-items:center;justify-content:center">'+corpo+'</div></div>');
+}
   }
   if(d.destino==='aprovacao'){enviarLancParaAprovacao(d);window._upFileData=null;cM();alert('Documento processado e enviado para aprovação (separador Faturas).');nav('fat');return;}
   d.id='L'+IDS.lanc++;d.alocado=false;LANCS.push(d);
