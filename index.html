@@ -1328,6 +1328,175 @@ function saveInvMov(tipo){if(!guardEdit())return;var artId=gv('im-art'),qtd=+gv(
 
 // ═══ ENTITY PICKER ═══
 function showEntPicker(){var h='<div style="background:var(--bg2);border-radius:var(--rl);border:1px solid var(--border);width:280px"><div class="mh"><span class="mt">Entidade</span><button class="ib" onclick="cM()">'+iX()+'</button></div><div style="padding:8px">';ENTS.forEach(function(e){h+='<div onclick="ent=\''+e+'\';$(\'entname\').textContent=\''+e+' ▾\';cM();nav(pg)" style="padding:7px 10px;border-radius:var(--r);cursor:pointer;font-size:12px;'+(e===ent?'background:rgba(201,168,76,.06);color:var(--golddim);font-weight:500':'color:var(--text2)')+'">'+e+'</div>';});h+='</div></div>';modal(h);}
+/* ════════════════════════════════════════════════════════════════════════
+   ORÇAMENTO P&L — correções (1) exportar Excel, (2) template no importar,
+   (3) coluna "Restaurante 2026" automática.
+   SEM SQL — tudo client-side. Colar no <script> do index.html.
+   ════════════════════════════════════════════════════════════════════════ */
+
+
+/* ─────────── 1) EXPORTAR EXCEL ─────────── */
+
+/* [NOVA] carregador único do XLSX (evita duplicação e corridas de load) */
+function _ensureXLSX(cb){
+  if(typeof XLSX!=='undefined'){cb();return;}
+  var s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload=function(){cb();};
+  s.onerror=function(){alert('Não foi possível carregar a biblioteca XLSX (verifique a ligação à internet).');};
+  document.head.appendChild(s);
+}
+
+/* [SUBSTITUIR] exportarExcelPL + _doExportPL */
+function exportarExcelPL(){
+  if(!PL_REST){alert('Selecione um restaurante.');return;}
+  _ensureXLSX(_doExportPL);
+}
+function _doExportPL(){
+  try{
+    var rubricas=PL_RUBRICAS.filter(function(r){return r.t!=='sec';});
+    var aoa=[['Rubrica','Restaurante','Mês','Real 2024','Real 2025','Previsão','Final 2026','Mercado']];
+    for(var m=1;m<=12;m++){
+      rubricas.forEach(function(r){
+        var row=plxRow(PL_REST,m,r.l);
+        aoa.push([r.l,PL_REST,m,row.r24||0,row.r25||0,row.prev||0,row.fin||0,row.merc||0]);
+      });
+    }
+    var wb=XLSX.utils.book_new();
+    var ws=XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb,ws,('PL_'+PL_REST).substring(0,31)); // nome seguro (<=31, sem &)
+    XLSX.writeFile(wb,'PL_Rest'+PL_REST+'_'+PL_ANO+'.xlsx');
+  }catch(e){console.error('export PL',e);alert('Erro ao exportar: '+e.message);}
+}
+
+
+/* ─────────── 2) TEMPLATE + IMPORTAR ─────────── */
+
+/* [SUBSTITUIR] downloadTemplatePL + _doTemplatePL */
+function downloadTemplatePL(){ _ensureXLSX(_doTemplatePL); }
+function _doTemplatePL(){
+  try{
+    var rubricas=PL_RUBRICAS.filter(function(r){return r.t!=='sec';});
+    var aoa=[['Rubrica','Restaurante','Mês','Real 2024','Real 2025','Previsão','Final 2026','Mercado']];
+    var rest=PL_REST||'113';
+    rubricas.forEach(function(r){aoa.push([r.l,rest,1,'','','','','']);});
+    var wb=XLSX.utils.book_new();
+    var ws=XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb,ws,'Template');
+    XLSX.writeFile(wb,'Template_PL.xlsx');
+  }catch(e){console.error('template PL',e);alert('Erro: '+e.message);}
+}
+
+/* [SUBSTITUIR] importarExcelPL — garante o XLSX e abre o diálogo */
+function importarExcelPL(){ if(!guardEdit())return; _ensureXLSX(_pickExcel); }
+
+/* [SUBSTITUIR] _pickExcel — com botão Template em destaque */
+function _pickExcel(){
+  modal('<div style="background:var(--bg2);border-radius:var(--rl);border:1px solid var(--border);width:520px"><div class="mh"><span class="mt">📊 Importar Excel</span><button class="ib" onclick="cM()">'+iX()+'</button></div><div class="mb"><div class="ab ab-blue" style="font-size:11.5px">Descarregue o <strong>Template</strong>, preencha as colunas de valores e volte a carregar. Cabeçalhos reconhecidos: Rubrica, Restaurante, Mês, Real 2024, Real 2025, Previsão, Final 2026, Mercado. A coluna <strong>Restaurante 2026</strong> é automática (lançamentos) e não se importa.</div><div style="text-align:center;margin-bottom:12px"><button class="btn btn-blue" onclick="downloadTemplatePL()">⬇ Descarregar Template</button></div><div class="fr"><label class="fl">Ficheiro preenchido</label><input class="fi" type="file" id="xl-file" accept=".xlsx,.xls"></div><div id="xl-res" style="font-size:12px"></div></div><div class="mf"><button class="btn" onclick="cM()">Cancelar</button><button class="btn btn-gold" onclick="_parseExcelPL()">Importar</button></div></div>');
+}
+
+
+/* ─────────── 3) COLUNA "RESTAURANTE 2026" AUTOMÁTICA ─────────── */
+
+/* [SUBSTITUIR] plLive — soma os CC imputados (valor s/IVA) numa rubrica/mês/restaurante.
+   Conta lançamentos "lançados" (inclui faturas que percorreram Aprovação → Lançar). */
+function plLive(rest,mes,rub){
+  rub=RUB_ALIAS[rub]||rub;
+  var tot=0;
+  LANCS.forEach(function(l){
+    if(l.estado!=='lançado')return;
+    if(String(l.emp||'').replace(/[^0-9]/g,'')!==String(rest))return;
+    var m=l.data?(new Date(l.data).getMonth()+1):0;
+    if(m!==mes)return;
+    (l.cc||[]).forEach(function(c){
+      var r=CC_RUBRICA_MAP[c.ccId];if(!r)return;
+      r=RUB_ALIAS[r]||r;
+      if(r===rub)tot+=(+c.valor||0);
+    });
+  });
+  return tot;
+}
+
+/* [SUBSTITUIR] plLiveMap — híbrido: vendas = Final 2026 (ou real se houver lançamentos
+   de vendas); custos = lançamentos reais s/IVA; Margem e P.A.C. combinam os dois. */
+function plLiveMap(rest,mes){
+  function live(lbl){return plLive(rest,mes,lbl);}
+  function fin(lbl){return plxRow(rest,mes,lbl).fin||0;}
+  function venda(lbl){var lv=live(lbl);return lv!==0?lv:fin(lbl);}
+  var m={};
+  m['VENDAS TOTAIS']=venda('VENDAS TOTAIS');
+  m['Vendas de Não Produto']=venda('Vendas de Não Produto');
+  m['VENDAS DE PRODUTO']=venda('VENDAS DE PRODUTO');
+  m['Alimentos']=live('Alimentos');
+  m['Refeições do Pessoal']=live('Refeições do Pessoal');
+  m['Perdas']=live('Perdas');
+  m['Papel']=live('Papel');
+  m['TOTAL DO CUSTO DAS VENDAS']=m['Alimentos']+m['Refeições do Pessoal']+m['Perdas']+m['Papel'];
+  m['MARGEM BRUTA']=m['VENDAS DE PRODUTO']-m['TOTAL DO CUSTO DAS VENDAS'];
+  m['MDO Variável']=live('MDO Variável');
+  m['MDO Fixa']=live('MDO Fixa');
+  m['Encargos sociais']=live('Encargos sociais');
+  m['MDO Gastos Fixos de Transporte']=live('MDO Gastos Fixos de Transporte');
+  m['TOTAL DO CUSTO PESSOAL']=m['MDO Variável']+m['MDO Fixa']+m['Encargos sociais']+m['MDO Gastos Fixos de Transporte'];
+  m['Publicidade']=live('Publicidade');
+  m['Promoção']=live('Promoção');
+  m['Serviços Externos']=live('Serviços Externos');
+  m['Gastos IT']=live('Gastos IT');
+  m['Fornecimentos Operacionais (OPS)']=live('Fornecimentos Operacionais (OPS)');
+  m['Manutenção e Reparações']=live('Manutenção e Reparações');
+  m['Gastos Gerais']=live('Gastos Gerais');
+  m['Diferenças de Caixa']=live('Diferenças de Caixa');
+  m['Outras Despesas (Outros Gastos Controloveis)']=live('Outras Despesas (Outros Gastos Controloveis)');
+  m['TOTAL DE DESPESAS CONTROLÁVEIS']=m['Publicidade']+m['Promoção']+m['Serviços Externos']+m['Gastos IT']+m['Fornecimentos Operacionais (OPS)']+m['Manutenção e Reparações']+m['Gastos Gerais']+m['Diferenças de Caixa']+m['Outras Despesas (Outros Gastos Controloveis)'];
+  m['P.A.C.']=m['MARGEM BRUTA']-m['TOTAL DO CUSTO PESSOAL']-m['TOTAL DE DESPESAS CONTROLÁVEIS'];
+  return m;
+}
+
+/* [SUBSTITUIR] pgOrc — render com coluna automática + botões Excel/Importar corrigidos */
+function pgOrc(){
+  var C=$('content'),ed=podeEditar();
+  var liveMap=plLiveMap(PL_REST,PL_MES2);
+  var rOpts=ENTS.slice(1).map(function(e){var id=e.replace(/[^0-9]/g,'');return'<option value="'+id+'"'+(id===PL_REST?' selected':'')+'>'+e+'</option>';}).join('');
+  var h='<div style="display:flex;gap:7px;align-items:center;margin-bottom:12px;flex-wrap:wrap"><label style="font-size:11px">Restaurante</label><select class="fs" onchange="PL_REST=this.value;PL_ENT=\'Rest. \'+this.value;pgOrc()">'+rOpts+'</select><label style="font-size:11px">Mês</label><select class="fs" onchange="PL_MES2=+this.value;pgOrc()">'+MESES.map(function(m,i){return'<option value="'+(i+1)+'"'+((i+1)===PL_MES2?' selected':'')+'>'+m+'</option>';}).join('')+'</select><button class="btn btn-blue" onclick="exportarExcelPL()" style="margin-left:auto">⬇ Excel</button>'+(ed?'<button class="btn" onclick="importarExcelPL()">📊 Importar</button>':'')+'</div>';
+  h+='<div class="ab ab-blue" style="font-size:11px">Coluna <strong>Restaurante 2026</strong> automática: vendas = Final 2026 (ou real, se houver lançamentos de vendas); custos = lançamentos reais s/IVA. Margem e P.A.C. combinam os dois.</div>';
+  var vp=plxRow(PL_REST,PL_MES2,'VENDAS DE PRODUTO').fin||0;
+  var mb=plxRow(PL_REST,PL_MES2,'MARGEM BRUTA').fin||0;
+  var pac=plxRow(PL_REST,PL_MES2,'P.A.C.').fin||0;
+  h+='<div class="kg">'+kpi('Vendas Produto','€'+fmt(vp),'Final 2026',true)+kpi('Margem Bruta','€'+fmt(mb),(vp?Math.round(mb/vp*100):0)+'%',true)+kpi('P.A.C.','€'+fmt(pac),(vp?Math.round(pac/vp*100):0)+'%',true)+kpi('Rubricas',PL_RUBRICAS.filter(function(r){return r.t!=='sec';}).length,'')+'</div>';
+  var COLS=[['r24','Real 2024'],['r25','Real 2025'],['prev','Previsão 2026'],['rst','Restaurante 2026'],['fin','Final 2026'],['merc','Ind. Mercado']];
+  var base={};COLS.forEach(function(c){base[c[0]]=plxRow(PL_REST,PL_MES2,'VENDAS DE PRODUTO')[c[0]]||0;});
+  base.rst=liveMap['VENDAS DE PRODUTO']||0;
+  h+='<div class="tw" style="overflow-x:auto"><table class="pl-tbl" style="min-width:1100px"><thead><tr style="background:var(--bg3)"><th rowspan="2" style="padding:6px 8px;position:sticky;left:0;background:var(--bg3);min-width:200px;font-size:10px;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border)">Rubrica</th>';
+  COLS.forEach(function(c){h+='<th colspan="2" style="text-align:center;font-size:10px;text-transform:uppercase;color:'+(c[0]==='rst'?'var(--blue)':'var(--text3)')+';border-bottom:1px solid var(--border);border-left:1px solid var(--border);padding:4px">'+c[1]+(c[0]==='rst'?' ⚙':'')+'</th>';});
+  h+='<th colspan="2" style="text-align:center;font-size:10px;text-transform:uppercase;color:var(--golddim);border-bottom:1px solid var(--border);border-left:1px solid var(--border);padding:4px">Variação</th></tr><tr style="background:var(--bg3)">';
+  COLS.forEach(function(){h+='<th style="text-align:right;font-size:9px;color:var(--text3);border-left:1px solid var(--border);padding:2px 4px">€</th><th style="text-align:right;font-size:9px;color:var(--text3);padding:2px 4px">%</th>';});
+  h+='<th style="text-align:right;font-size:9px;color:var(--golddim);border-left:1px solid var(--border);padding:2px 4px">€</th><th style="text-align:right;font-size:9px;color:var(--golddim);padding:2px 4px">%</th></tr></thead><tbody>';
+  PL_RUBRICAS.forEach(function(r){
+    if(r.t==='sec'){h+='<tr class="pl-sec"><td colspan="'+(COLS.length*2+3)+'">'+r.l+'</td></tr>';return;}
+    var isP=r.t==='pac',isB=r.t==='tot'||isP;
+    var bg=isP?'rgba(201,168,76,.07)':isB?'var(--bg3)':'var(--bg2)';
+    var esc=r.l.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    h+='<tr class="'+(isP?'pl-pac':isB?'pl-tot':'')+'"><td class="'+(r.t==='det'?'pl-det':'')+'" style="position:sticky;left:0;background:'+bg+';color:'+(isP?'var(--golddim)':'inherit')+'">'+r.l+'</td>';
+    COLS.forEach(function(c){
+      if(c[0]==='rst'){
+        var lv=liveMap[r.l]||0;
+        h+='<td style="text-align:right;border-left:1px solid var(--border);padding:5px 6px;background:rgba(26,95,160,.06)" title="Automático — lançamentos imputados">'+(lv?fmt(Math.round(lv)):'—')+'</td>';
+        h+='<td style="text-align:right;font-size:10px;color:var(--text3);padding:5px 6px">'+(lv&&base.rst?(lv/base.rst*100).toFixed(1)+'%':'')+'</td>';
+        return;
+      }
+      var v=plxRow(PL_REST,PL_MES2,r.l)[c[0]]||0;
+      var pcv=base[c[0]]?(v/base[c[0]]*100):0;
+      if(ed)h+='<td style="padding:2px;text-align:right;border-left:1px solid var(--border)"><input type="number" value="'+v+'" style="width:72px;text-align:right;border:1px solid var(--border);border-radius:3px;padding:2px 3px;font-size:11px;background:var(--bg)" onchange="plxSet(\''+PL_REST+'\','+PL_MES2+',\''+esc+'\',\''+c[0]+'\',this.value);pgOrc()"></td>';
+      else h+='<td style="text-align:right;border-left:1px solid var(--border);padding:5px 6px">'+(v?fmt(v):'—')+'</td>';
+      h+='<td style="text-align:right;font-size:10px;color:var(--text3);padding:5px 6px">'+(v&&base[c[0]]?pcv.toFixed(1)+'%':'')+'</td>';
+    });
+    var fin=plxRow(PL_REST,PL_MES2,r.l).fin||0,prev=plxRow(PL_REST,PL_MES2,r.l).prev||0,vd=fin-prev,vpc=prev?(vd/prev*100):0,inc=r.inc===true,ok=inc?(vd>=0):(vd<=0);
+    h+='<td style="text-align:right;border-left:1px solid var(--border);font-weight:600;padding:5px 6px;color:'+(prev?(ok?'var(--green)':'var(--red)'):'var(--text3)')+'">'+(prev?(vd>=0?'+':'')+fmt(vd):'—')+'</td>';
+    h+='<td style="text-align:right;font-size:10px;padding:5px 6px;color:'+(prev?(ok?'var(--green)':'var(--red)'):'var(--text3)')+'">'+(prev?vpc.toFixed(1)+'%':'')+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  C.innerHTML=h;
+}
 </script>
 </body>
 </html>
